@@ -1,0 +1,14 @@
+/*
+  Cross-origin isolation is what gives the page SharedArrayBuffer, which the
+  multi-threaded ffmpeg core needs. Netlify and Cloudflare Pages read this file;
+  Vercel reads vercel.json. GitHub Pages cannot set headers at all, so the app
+  detects that and falls back to the single-threaded core there.
+*/
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
+*/
