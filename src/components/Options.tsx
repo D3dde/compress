@@ -29,6 +29,7 @@ const SPEEDS: { value: SpeedPreset; label: string }[] = [
 ]
 
 const QUALITY: { value: QualityMode; label: string; passes: string }[] = [
+  { value: 'single', label: 'Fastest', passes: '1 pass (rate control)' },
   { value: 'fast', label: 'Quick', passes: 'up to 2 passes' },
   { value: 'balanced', label: 'Accurate', passes: 'up to 3 passes' },
   { value: 'best', label: 'Exhaustive', passes: 'up to 4 passes' },

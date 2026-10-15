@@ -4,7 +4,7 @@ export type VideoCodec = 'h264' | 'h265' | 'vp9'
 export type AudioCodec = 'aac' | 'opus' | 'mp3'
 export type AudioMode = 'encode' | 'strip'
 export type SpeedPreset = 'fast' | 'balanced' | 'quality'
-export type QualityMode = 'fast' | 'balanced' | 'best'
+export type QualityMode = 'single' | 'fast' | 'balanced' | 'best'
 /** 0 keeps the source value. */
 export type MaxHeight = 0 | 2160 | 1440 | 1080 | 720 | 480 | 360
 export type MaxFps = 0 | 60 | 30 | 24 | 15
@@ -30,11 +30,11 @@ export const DEFAULT_SETTINGS: Settings = {
   audioMode: 'encode',
   audioCodec: 'aac',
   audioBitrate: 128_000,
-  speed: 'balanced',
-  qualityMode: 'balanced',
+  speed: 'fast',
+  qualityMode: 'fast',
   maxHeight: 0,
   maxFps: 0,
-  autoDownscale: false,
+  autoDownscale: true,
 }
 
 interface CodecProfile {
@@ -86,8 +86,8 @@ const SPEED_THREAD_HINT: Record<SpeedPreset, string> = {
   quality: 'threads=0:sliced-threads=1',
 }
 
-/** Max CRF search iterations; each one is a full encode. */
-const PASSES: Record<QualityMode, number> = { fast: 2, balanced: 3, best: 4 }
+/** Max CRF search iterations; each one is a full encode. 'single' = 1 pass with rate control. */
+const PASSES: Record<QualityMode, number> = { single: 1, fast: 2, balanced: 3, best: 4 }
 
 const CONTAINER_OVERHEAD_BPS = 4000
 const MIN_AUDIO_BITRATE = 16_000

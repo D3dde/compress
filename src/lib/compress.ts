@@ -171,8 +171,6 @@ export async function compressVideo({
         try {
           code = await ffmpeg.exec(args, -1, signal ? { signal } : undefined)
         } catch (error) {
-          // ffmpeg.wasm turns a wasm abort into an unrelated TypeError, so the
-          // captured log is the only useful thing to report here.
           throw new Error(
             `ffmpeg crashed during ${label}. ${log.length > 0 ? tail(log) : String(error).slice(0, 120)}`,
           )
@@ -188,10 +186,56 @@ export async function compressVideo({
         }
       }
 
+      // Single-pass mode: one rate-controlled encode at the calculated bitrate.
+      if (settings.qualityMode === 'single') {
+        emit({ phase: 'encoding', pass: 1, totalPasses: 1, crf: null, message: 'Encoding (single pass)…' })
+        const attempt = await encodeOnce('single pass', { bitrateCap: plan.videoBitrate })
+        const hitTarget = attempt.size <= plan.targetBytes
+        emit({
+          phase: 'done',
+          ratio: 1,
+          pass: 1,
+          crf: null,
+          attemptBytes: attempt.size,
+          message: hitTarget ? 'Finished' : 'Finished (over target)',
+        })
+        const achievedVideoBitrate = Math.max(
+          0,
+          Math.round((attempt.size * 8 * 0.996) / plan.durationSec - plan.audioBitrate),
+        )
+        return {
+          blob: new Blob([toBlobPart(attempt.bytes)], {
+            type: plan.container === 'mp4' ? 'video/mp4' : 'video/webm',
+          }),
+          fileName: outputFileName(file.name, plan.extension),
+          bytes: attempt.size,
+          targetBytes: plan.targetBytes,
+          sourceBytes: file.size,
+          crf: null,
+          rateControlled: true,
+          videoBitrate: achievedVideoBitrate,
+          audioBitrate: plan.audioBitrate,
+          attempts: 1,
+          hitTarget,
+          durationSec: plan.durationSec,
+          width: plan.outputWidth,
+          height: plan.outputHeight,
+          fps: plan.outputFps,
+          info,
+          notes: [
+            ...plan.notes,
+            ...(hitTarget
+              ? []
+              : [
+                  `Single-pass rate control produced ${formatBytes(attempt.size)}, target was ${formatBytes(plan.targetBytes)}.`,
+                  'Try "fast" or "balanced" quality mode for a CRF search that usually fits better.',
+                ]),
+          ],
+        }
+      }
+
+      // Multi-pass CRF search (default behavior).
       let crf = plan.crf
-      // The largest attempt that fits is the best quality available under the
-      // target; the smallest miss is kept as a fallback so a near miss is never
-      // thrown away.
       const keepers: { under: Attempt | null; over: Attempt | null } = { under: null, over: null }
       let previousSize: number | null = null
       const tried = new Set<number>([quantize(crf)])
@@ -223,9 +267,6 @@ export async function compressVideo({
           previousSize !== null &&
           Math.abs(attempt.size - previousSize) / previousSize < CONVERGED_DELTA
         ) {
-          // Two attempts in a row barely moving the size means the encoder has
-          // hit its quality floor for this resolution; more CRF will not help,
-          // so hand over to rate control instead of burning passes.
           break
         }
 
@@ -236,11 +277,6 @@ export async function compressVideo({
         crf = next
       }
 
-      // Still over target, so the encoder hit its quality floor here. Switch to
-      // rate control: give the whole budget to the VBV ceiling and recalibrate
-      // that ceiling against the size it actually produced. A rate-controlled
-      // file is lower quality than a CRF one, which is why this only runs once
-      // the quality search has failed.
       let correctiveAttempt = 0
       let lastCap: number | null = null
       let lastSize: number | null = null
@@ -250,9 +286,6 @@ export async function compressVideo({
         passRatio = 0
         correctiveAttempt += 1
 
-        // Size follows the ceiling almost linearly, so scaling the last ceiling by
-        // the last miss lands on the target. The margin keeps the next attempt on
-        // the safe side instead of oscillating around it.
         const bitrateCap = clampCap(
           lastCap === null || lastSize === null
             ? plan.videoBitrate
@@ -267,8 +300,6 @@ export async function compressVideo({
         const fits = record(attempt)
         if (fits) break
 
-        // The ceiling moved but the file did not: the encoder, not the budget, is
-        // the limit, so another attempt would buy nothing.
         if (lastSize !== null && Math.abs(attempt.size - lastSize) / lastSize < CONVERGED_DELTA) break
         lastCap = bitrateCap
         lastSize = attempt.size
