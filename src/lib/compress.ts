@@ -146,7 +146,7 @@ export async function compressVideo({
       },
     },
     async (ffmpeg, inputPath) => {
-      const info = await probe(ffmpeg, inputPath, log)
+      const info = await probe(ffmpeg, inputPath)
       signal?.throwIfAborted()
 
       emit({

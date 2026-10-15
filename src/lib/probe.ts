@@ -39,37 +39,27 @@ const SAMPLE_RATE = /(\d+)\s*Hz/
 const CHANNELS = /\b(mono|stereo|quad|5\.1|7\.1|9\.1)(\b|,)/
 
 /**
- * Reads container and stream metadata.
- *
- * This runs `ffmpeg -i`, which makes ffmpeg describe the file on stderr and
- * exit non-zero because no output was requested. Parsing that description is
- * the point: ffprobe is exposed by the wasm core but is not usable there — it
- * aborts when it is the first command a worker runs, and the wrapper reports the
- * abort as an unrelated type error.
- *
- * `log` is filled with ffmpeg's own output, which doubles as the error message
- * when something goes wrong later.
+ * Reads container and stream metadata using ffmpeg -i.
+ * Uses a dedicated log buffer to avoid clobbering the main job log.
  */
-export async function probe(
-  ffmpeg: FFmpeg,
-  inputPath: string,
-  log: string[] = [],
-): Promise<MediaInfo> {
-  log.length = 0
-  ffmpeg.on('log', ({ message }) => {
-    log.push(message)
-    if (log.length > 60) log.shift()
-  })
+export async function probe(ffmpeg: FFmpeg, inputPath: string): Promise<MediaInfo> {
+  const probeLog: string[] = []
 
-  // A null muxer keeps ffmpeg from waiting for an output that will never exist.
+  const handler = ({ message }: { message: string }) => {
+    probeLog.push(message)
+  }
+  ffmpeg.on('log', handler)
+
   try {
     await ffmpeg.exec(['-hide_banner', '-i', inputPath, '-f', 'null', '-'])
   } catch {
     // ffmpeg exits non-zero for "no output specified"; the log is the result.
+  } finally {
+    ffmpeg.off('log', handler)
   }
 
-  const info = parse(log)
-  if (!info) throw new Error(`Could not read the metadata of this file. ${tail(log)}`)
+  const info = parse(probeLog)
+  if (!info) throw new Error(`Could not read the metadata of this file. ${tail(probeLog)}`)
   return info
 }
 
